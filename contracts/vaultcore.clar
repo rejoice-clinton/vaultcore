@@ -280,3 +280,74 @@
     )
   )
 )
+
+;; Complete Loan Settlement with Interest
+(define-public (repay-loan
+    (loan-id uint)
+    (amount uint)
+  )
+  (begin
+    ;; Primary loan ID validation
+    (asserts! (validate-loan-id loan-id) ERR-INVALID-LOAN-ID)
+
+    (let (
+        (loan (unwrap! (map-get? loans { loan-id: loan-id }) ERR-LOAN-NOT-FOUND))
+        (interest-owed (calculate-interest (get loan-amount loan) (get interest-rate loan)
+          (- stacks-block-height (get last-interest-calc loan))
+        ))
+        (total-owed (+ (get loan-amount loan) interest-owed))
+      )
+      (begin
+        (asserts! (is-eq (get status loan) "active") ERR-LOAN-NOT-ACTIVE)
+        (asserts! (is-eq (get borrower loan) tx-sender) ERR-NOT-AUTHORIZED)
+        (asserts! (>= amount total-owed) ERR-INVALID-AMOUNT)
+
+        ;; Mark loan as fully repaid
+        (map-set loans { loan-id: loan-id }
+          (merge loan {
+            status: "repaid",
+            last-interest-calc: stacks-block-height,
+          })
+        )
+
+        ;; Release collateral back to borrower
+        (var-set total-btc-locked
+          (- (var-get total-btc-locked) (get collateral-amount loan))
+        )
+
+        ;; Clean up user loan tracking
+        (match (map-get? user-loans { user: tx-sender })
+          existing-loans (ok (map-set user-loans { user: tx-sender } { active-loans: (filter not-equal-loan-id (get active-loans existing-loans)) }))
+          (ok false)
+        )
+      )
+    )
+  )
+)
+
+;; PUBLIC READ-ONLY INTERFACE
+
+;; Comprehensive Loan Information Retrieval
+(define-read-only (get-loan-details (loan-id uint))
+  (map-get? loans { loan-id: loan-id })
+)
+
+;; User Portfolio Overview
+(define-read-only (get-user-loans (user principal))
+  (map-get? user-loans { user: user })
+)
+
+;; Real-time Platform Analytics
+(define-read-only (get-platform-stats)
+  {
+    total-btc-locked: (var-get total-btc-locked),
+    total-loans-issued: (var-get total-loans-issued),
+    minimum-collateral-ratio: (var-get minimum-collateral-ratio),
+    liquidation-threshold: (var-get liquidation-threshold),
+  }
+)
+
+;; Supported Asset Registry
+(define-read-only (get-valid-assets)
+  VALID-ASSETS
+)
